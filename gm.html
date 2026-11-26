@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#15100b">
+<title>迷你測試服 GM 後台</title>
+<style>
+  :root { --bg:#15100b; --card:#231a10; --line:#4a3820; --gold:#e0b24a; --text:#f0e4c8; --dim:#a89878; --bad:#ff8a7a; --good:#8fe6a8; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui,-apple-system,"Noto Sans TC",sans-serif; }
+  main { max-width:480px; margin:0 auto; padding:20px 16px 48px; }
+  h1 { font-size:22px; color:var(--gold); margin:4px 0 16px; }
+  h2 { font-size:17px; color:var(--gold); margin:0 0 10px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  label { display:block; font-size:13px; color:var(--dim); margin:8px 0 4px; }
+  input { width:100%; padding:11px 12px; font-size:16px; border-radius:8px; border:1px solid var(--line); background:#0e0a06; color:var(--text); }
+  button { width:100%; margin-top:12px; padding:12px; font-size:16px; font-weight:bold; border:0; border-radius:8px; background:var(--gold); color:#1a1408; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--gold); border:1px solid var(--gold); }
+  button:disabled { opacity:.5; }
+  .msg { margin-top:10px; font-size:14px; min-height:1em; white-space:pre-wrap; }
+  .msg.bad { color:var(--bad); } .msg.good { color:var(--good); }
+  .row { display:flex; gap:8px; } .row > * { flex:1; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  td { padding:8px 4px; border-top:1px solid var(--line); vertical-align:top; }
+  td small { color:var(--dim); }
+  td button { margin:0; padding:6px 10px; font-size:14px; width:auto; }
+  #user-list tr { cursor:pointer; }
+  .tag { font-size:11px; color:#1a1408; background:var(--gold); border-radius:4px; padding:0 4px; margin-left:4px; }
+  .hidden { display:none; }
+  a { color:var(--gold); }
+</style>
+</head>
+<body>
+<main>
+  <h1>🥤 迷你測試服 GM 後台</h1>
+
+  <section id="login-box">
+    <h2>GM 登入</h2>
+    <label for="gm-user">帳號</label>
+    <input id="gm-user" autocomplete="username" autocapitalize="off">
+    <label for="gm-pass">密碼</label>
+    <input id="gm-pass" type="password" autocomplete="current-password">
+    <button id="btn-login">登入</button>
+    <div class="msg" id="login-msg"></div>
+  </section>
+
+  <div id="panel" class="hidden">
+    <section>
+      <h2>開新帳號</h2>
+      <label for="new-user">帳號（4～16 個英文或數字）</label>
+      <input id="new-user" autocapitalize="off" autocomplete="off">
+      <label for="new-pass">密碼（至少 8 個字）</label>
+      <input id="new-pass" autocomplete="off">
+      <button id="btn-create">建立帳號</button>
+      <div class="msg" id="create-msg"></div>
+    </section>
+
+    <section>
+      <h2>重設密碼</h2>
+      <label for="rs-user">帳號</label>
+      <input id="rs-user" autocapitalize="off" autocomplete="off">
+      <label for="rs-pass">新密碼</label>
+      <input id="rs-pass" autocomplete="off">
+      <button id="btn-reset">重設密碼</button>
+      <div class="msg" id="reset-msg"></div>
+    </section>
+
+    <section>
+      <div class="row" style="align-items:center"><h2 style="margin:0">所有帳號</h2>
+        <button class="secondary" id="btn-refresh" style="margin:0;flex:0 0 auto;width:auto;padding:6px 14px">重新整理</button></div>
+      <table><tbody id="user-list"></tbody></table>
+      <div class="msg" id="list-msg"></div>
+    </section>
+
+    <section>
+      <h2>存檔備份／還原</h2>
+      <label for="bk-user">帳號（也可以點上面帳號列表帶入）</label>
+      <input id="bk-user" autocapitalize="off" autocomplete="off">
+      <button id="btn-bk">查詢備份</button>
+      <table><tbody id="bk-list"></tbody></table>
+      <div class="msg" id="bk-msg"></div>
+      <small style="color:var(--dim)">每人自動保留最近 14 份（至少相隔 6 小時）。還原會覆蓋目前存檔，請先請對方登出。</small>
+    </section>
+
+    <button class="secondary" id="btn-logout">登出</button>
+    <p style="text-align:center;margin-top:20px"><a href="./">← 回遊戲</a></p>
+  </div>
+</main>
+
+<script src="vendor/supabase.js"></script>
+<script>
+const sb = window.supabase.createClient(
+  "https://undscvuhlzjugrxvclmc.supabase.co",
+  "sb_publishable_qNUJcAoToAGCZkQY8Wv-bA_GlTRde1f",
+  { auth: { persistSession: true, storageKey: "mini-gm" } }
+);
+const $ = id => document.getElementById(id);
+const say = (id, text, ok) => { const el = $(id); el.textContent = text; el.className = "msg " + (ok ? "good" : "bad"); };
+const errText = e => {
+  const m = String((e && (e.message || e.details)) || e || "");
+  if (/does not exist|Could not find the function/i.test(m)) return "資料庫還沒裝 GM 功能，請先在 SQL Editor 執行 02_gm.sql";
+  return m;
+};
+const fmt = t => t ? new Date(t).toLocaleString("zh-TW", { month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "從未";
+
+async function showPanel() {
+  $("login-box").classList.add("hidden");
+  $("panel").classList.remove("hidden");
+  loadUsers();
+}
+
+async function loadUsers() {
+  say("list-msg", "讀取中…", true);
+  const { data, error } = await sb.rpc("gm_list_users");
+  if (error) return say("list-msg", errText(error));
+  $("user-list").innerHTML = "";
+  for (const u of data || []) {
+    const tr = document.createElement("tr");
+    const a = document.createElement("td");
+    a.textContent = u.username;
+    if (u.is_gm) { const t = document.createElement("span"); t.className = "tag"; t.textContent = "GM"; a.appendChild(t); }
+    const sm = document.createElement("small"); sm.textContent = "\n" + (u.chars || "還沒有角色");
+    sm.style.whiteSpace = "pre-wrap"; a.appendChild(sm);
+    const b = document.createElement("td");
+    b.innerHTML = "<small>最後登入</small><br>";
+    b.appendChild(document.createTextNode(fmt(u.last_sign_in_at)));
+    tr.append(a, b);
+    tr.onclick = () => { $("bk-user").value = u.username; $("rs-user").value = u.username; };
+    $("user-list").appendChild(tr);
+  }
+  say("list-msg", "共 " + (data || []).length + " 個帳號", true);
+}
+
+$("btn-login").onclick = async () => {
+  const u = $("gm-user").value.trim().toLowerCase(), p = $("gm-pass").value;
+  if (!u || !p) return say("login-msg", "請輸入帳號密碼");
+  $("btn-login").disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email: u + "@afei.gg", password: p });
+  $("btn-login").disabled = false;
+  if (error) return say("login-msg", /invalid/i.test(error.message) ? "帳號或密碼錯誤" : errText(error));
+  const { data: adm } = await sb.from("admins").select("user_id").maybeSingle();
+  if (!adm) { await sb.auth.signOut(); return say("login-msg", "這個帳號不是 GM"); }
+  showPanel();
+};
+
+$("btn-create").onclick = async () => {
+  const u = $("new-user").value.trim(), p = $("new-pass").value;
+  $("btn-create").disabled = true;
+  const { error } = await sb.rpc("gm_create_user", { p_username: u, p_password: p });
+  $("btn-create").disabled = false;
+  if (error) return say("create-msg", errText(error));
+  say("create-msg", "✅ 已建立帳號「" + u + "」\n密碼：" + p + "\n把帳號密碼傳給朋友就能登入了", true);
+  $("new-user").value = ""; $("new-pass").value = "";
+  loadUsers();
+};
+
+$("btn-reset").onclick = async () => {
+  const u = $("rs-user").value.trim(), p = $("rs-pass").value;
+  $("btn-reset").disabled = true;
+  const { error } = await sb.rpc("gm_reset_password", { p_username: u, p_password: p });
+  $("btn-reset").disabled = false;
+  if (error) return say("reset-msg", errText(error));
+  say("reset-msg", "✅ 「" + u + "」的新密碼：" + p, true);
+  $("rs-pass").value = "";
+};
+
+
+const fmtFull = t => new Date(t).toLocaleString("zh-TW", { year:"numeric", month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit" });
+const bkErr = e => /does not exist|Could not find the function/i.test(String((e && e.message) || e)) ? "還沒安裝備份功能，請先在 SQL Editor 執行 03_backup.sql" : errText(e);
+
+$("btn-bk").onclick = async () => {
+  const u = $("bk-user").value.trim();
+  if (!u) return say("bk-msg", "請輸入帳號");
+  $("bk-list").innerHTML = "";
+  say("bk-msg", "查詢中…", true);
+  const { data, error } = await sb.rpc("gm_list_backups", { p_username: u });
+  if (error) return say("bk-msg", bkErr(error));
+  if (!data || !data.length) return say("bk-msg", "「" + u + "」還沒有備份", false);
+  for (const r of data) {
+    const tr = document.createElement("tr");
+    const a = document.createElement("td");
+    a.textContent = fmtFull(r.created_at);
+    const sm = document.createElement("small"); sm.textContent = "\n" + r.kb + " KB"; sm.style.whiteSpace = "pre-wrap"; a.appendChild(sm);
+    const b = document.createElement("td"); b.style.textAlign = "right";
+    const btn = document.createElement("button"); btn.textContent = "還原";
+    btn.onclick = async () => {
+      if (!confirm("確定把「" + u + "」的存檔還原到\n" + fmtFull(r.created_at) + "？\n\n目前的存檔會被覆蓋，無法復原。請確認對方已登出。")) return;
+      btn.disabled = true;
+      const { data: res, error: e2 } = await sb.rpc("gm_restore_backup", { p_id: r.id });
+      btn.disabled = false;
+      if (e2) return say("bk-msg", bkErr(e2));
+      say("bk-msg", "✅ " + res + "\n請對方重新整理頁面再登入", true);
+    };
+    b.appendChild(btn);
+    tr.append(a, b);
+    $("bk-list").appendChild(tr);
+  }
+  say("bk-msg", "共 " + data.length + " 份備份（新到舊）", true);
+};
+
+$("btn-refresh").onclick = loadUsers;
+$("btn-logout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+
+sb.auth.getSession().then(async ({ data }) => {
+  if (!data.session) return;
+  const { data: adm } = await sb.from("admins").select("user_id").maybeSingle();
+  if (adm) showPanel();
+});
+</script>
+</body>
+</html>

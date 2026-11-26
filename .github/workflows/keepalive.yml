@@ -1,0 +1,18 @@
+name: keepalive
+# 每 2 天戳一下 Supabase，避免免費方案因 7 天沒活動被暫停
+on:
+  schedule:
+    - cron: "17 3 */2 * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ping supabase
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "apikey: sb_publishable_qNUJcAoToAGCZkQY8Wv-bA_GlTRde1f" \
+            "https://undscvuhlzjugrxvclmc.supabase.co/rest/v1/settings?select=key&limit=1")
+          echo "HTTP $code"
+          # 匿名帳號沒有讀取權限會回 401/403，但請求已經打到資料庫，同樣算有活動
+          case "$code" in 200|401|403) exit 0;; *) exit 1;; esac
